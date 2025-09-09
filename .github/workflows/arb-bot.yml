@@ -1,13 +1,14 @@
 name: Arbitrage Bot (scheduled)
 
 on:
-  workflow_dispatch:      # kézzel is indítható
+  workflow_dispatch:            # kézzel is indítható az Actions fülön
   schedule:
-    - cron: "*/5 * * * *" # 5 percenként fut
+    - cron: "*/5 * * * *"       # 5 percenként fut
 
 jobs:
   run:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -30,6 +31,10 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
           TOTAL_STAKE: ${{ secrets.TOTAL_STAKE }}
+          # Alább: sportok vesszővel elválasztva (repo Secrets-ben állítsd be)
+          SPORTS: ${{ secrets.SPORTS }}               # pl.: "tenisz,labdarúgás"
+          # Opcionális: ha külön szeretnéd kapcsolgatni a Bet365-öt (1 = bekapcsol)
+          BET365_ENABLED: ${{ secrets.BET365_ENABLED }} # "0" vagy "1"
         run: |
           . .venv/bin/activate
           python runner.py
