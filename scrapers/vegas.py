@@ -1,31 +1,81 @@
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Iterable
 from playwright.async_api import async_playwright
 
-URL = "https://www.vegas.hu/sport/tenisz"
+BASE_URL = "https://www.vegas.hu/sport"
 
-async def fetch_events() -> List[Dict[str, Any]]:
-    events: List[Dict[str, Any]] = []
+def _norm_num(txt: str) -> float:
+    return float(txt.replace("\xa0", "").replace(",", ".").strip())
+
+def _split_title(title: str):
+    t = title.replace("–", "-").replace("—", "-")
+    parts = [p.strip() for p in t.split("-")]
+    if len(parts) >= 2:
+        return parts[0], parts[1]
+    return title.strip(), "Másik"
+
+async def fetch_events(sports: Iterable[str]) -> List[Dict[str, Any]]:
+    wanted = {s.lower() for s in sports}
+    out: List[Dict[str, Any]] = []
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True, args=["--no-sandbox"])
         page = await browser.new_page()
-        await page.goto(URL, timeout=60000)
+        await page.set_extra_http_headers({
+            "User-Agent": ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                           "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"),
+            "Accept-Language": "hu-HU,hu;q=0.9,en;q=0.8"
+        })
+        await page.goto(BASE_URL, timeout=60000)
         await page.wait_for_load_state("domcontentloaded")
 
-        matches = await page.query_selector_all("div.event-row")
-        for match in matches[:10]:
-            title_el = await match.query_selector("div.event-name")
-            odds_els = await match.query_selector_all("span.odds")
-            if not title_el or len(odds_els) != 2:
+        try:
+            await page.get_by_text("Elfogadom").click(timeout=3000)
+        except:
+            pass
+
+        for sport in ("Labdarúgás", "Tenisz"):
+            if sport.lower() not in wanted:
                 continue
-            title = (await title_el.inner_text()).strip()
-            p1, p2 = [s.strip() for s in title.replace("–", "-").split("-")[:2]]
-            o1 = float((await odds_els[0].inner_text()).replace(",", "."))
-            o2 = float((await odds_els[1].inner_text()).replace(",", "."))
-            events.append({
-                "event": f"{p1} - {p2}",
-                "market": "Match Winner",
-                "bookmaker": "Vegas.hu",
-                "odds": {p1: o1, p2: o2}
-            })
+
+            # navigáljunk a kívánt sporthoz – többféle helyen lehet felirat
+            try:
+                await page.get_by_text(sport, exact=False).first.click(timeout=5000)
+            except:
+                await page.mouse.wheel(0, 2000)
+                try:
+                    await page.get_by_text(sport, exact=False).first.click(timeout=5000)
+                except:
+                    continue
+
+            await page.wait_for_timeout(1500)
+            rows = await page.query_selector_all("div.event-row, li:has(.odds), div:has(.event-name)")
+            taken = 0
+            for row in rows:
+                if taken >= 20:
+                    break
+                title_el = await row.query_selector(".event-name, .name, .title")
+                odd_els = await row.query_selector_all(".odds, .odd, span:has-text('.')")
+
+                if not title_el or len(odd_els) < 2:
+                    continue
+
+                title = (await title_el.inner_text()).strip()
+                p1, p2 = _split_title(title)
+
+                try:
+                    o1 = _norm_num(await odd_els[0].inner_text())
+                    o2 = _norm_num(await odd_els[1].inner_text())
+                except:
+                    continue
+
+                market = "Match Winner" if sport.lower() == "tenisz" else "1X2"
+                odds = {p1: o1, p2: o2}
+                out.append({
+                    "event": f"{p1} - {p2}",
+                    "market": market,
+                    "bookmaker": "Vegas.hu",
+                    "odds": odds
+                })
+                taken += 1
+
         await browser.close()
-    return events
+    return out
