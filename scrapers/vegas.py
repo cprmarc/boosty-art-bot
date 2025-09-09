@@ -1,21 +1,51 @@
-from typing import List, Dict, Any, Iterable
+# scrapers/vegas.py
+from typing import List, Dict, Any
 from playwright.async_api import async_playwright
 
 BASE_URL = "https://www.vegas.hu/sport"
 
-def _norm_num(txt: str) -> float:
-    return float(txt.replace("\xa0", "").replace(",", ".").strip())
+def _norm(txt: str) -> float:
+    return float(txt.replace("\xa0","").replace(",",".").strip())
 
-def _split_title(title: str):
-    t = title.replace("–", "-").replace("—", "-")
-    parts = [p.strip() for p in t.split("-")]
-    if len(parts) >= 2:
-        return parts[0], parts[1]
-    return title.strip(), "Másik"
+def _split(title: str):
+    t = title.replace("–","-").replace("—","-")
+    if " - " in t:
+        a,b = t.split(" - ",1)
+        return a.strip(), b.strip()
+    return t.strip(), "Másik"
 
-async def fetch_events(sports: Iterable[str]) -> List[Dict[str, Any]]:
-    wanted = {s.lower() for s in sports}
+async def _collect_from_page(page) -> List[Dict[str, Any]]:
     out: List[Dict[str, Any]] = []
+    rows = await page.query_selector_all("div.event-row, li:has(.odds), div:has(.event-name)")
+    for r in rows:
+        title_el = await r.query_selector(".event-name, .name, .title, a")
+        odd_els  = await r.query_selector_all(".odds, .odd, span:has-text('.')")
+
+        if not title_el or len(odd_els) < 2:
+            continue
+
+        try:
+            title = (await title_el.inner_text()).strip()
+            o1 = _norm(await odd_els[0].inner_text())
+            o2 = _norm(await odd_els[1].inner_text())
+        except:
+            continue
+
+        p1, p2 = _split(title)
+        # Vegas nem mindig jelzi a piacot → legyen "Match Winner"/"1X2" heur.
+        market = "Match Winner" if any(x in title.lower() for x in ["vs","v "," - "]) else "1X2"
+        out.append({
+            "event": f"{p1} - {p2}",
+            "market": market,
+            "bookmaker": "Vegas.hu",
+            "odds": {p1: o1, p2: o2}
+        })
+    return out
+
+async def fetch_events(urls: List[str]) -> List[Dict[str, Any]]:
+    events: List[Dict[str, Any]] = []
+    targets = urls or [BASE_URL]
+
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True, args=["--no-sandbox"])
         page = await browser.new_page()
@@ -24,58 +54,22 @@ async def fetch_events(sports: Iterable[str]) -> List[Dict[str, Any]]:
                            "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"),
             "Accept-Language": "hu-HU,hu;q=0.9,en;q=0.8"
         })
-        await page.goto(BASE_URL, timeout=60000)
-        await page.wait_for_load_state("domcontentloaded")
 
-        try:
-            await page.get_by_text("Elfogadom").click(timeout=3000)
-        except:
-            pass
+        for url in targets:
+            try:
+                await page.goto(url, timeout=90000)
+                for t in ("Elfogadom", "Rendben", "OK"):
+                    try:
+                        await page.get_by_text(t, exact=False).first.click(timeout=2000); break
+                    except: pass
 
-        for sport in ("Labdarúgás", "Tenisz"):
-            if sport.lower() not in wanted:
+                for _ in range(8):
+                    await page.mouse.wheel(0, 2000)
+                    await page.wait_for_timeout(600)
+
+                events.extend(await _collect_from_page(page))
+            except Exception:
                 continue
 
-            # navigáljunk a kívánt sporthoz – többféle helyen lehet felirat
-            try:
-                await page.get_by_text(sport, exact=False).first.click(timeout=5000)
-            except:
-                await page.mouse.wheel(0, 2000)
-                try:
-                    await page.get_by_text(sport, exact=False).first.click(timeout=5000)
-                except:
-                    continue
-
-            await page.wait_for_timeout(1500)
-            rows = await page.query_selector_all("div.event-row, li:has(.odds), div:has(.event-name)")
-            taken = 0
-            for row in rows:
-                if taken >= 20:
-                    break
-                title_el = await row.query_selector(".event-name, .name, .title")
-                odd_els = await row.query_selector_all(".odds, .odd, span:has-text('.')")
-
-                if not title_el or len(odd_els) < 2:
-                    continue
-
-                title = (await title_el.inner_text()).strip()
-                p1, p2 = _split_title(title)
-
-                try:
-                    o1 = _norm_num(await odd_els[0].inner_text())
-                    o2 = _norm_num(await odd_els[1].inner_text())
-                except:
-                    continue
-
-                market = "Match Winner" if sport.lower() == "tenisz" else "1X2"
-                odds = {p1: o1, p2: o2}
-                out.append({
-                    "event": f"{p1} - {p2}",
-                    "market": market,
-                    "bookmaker": "Vegas.hu",
-                    "odds": odds
-                })
-                taken += 1
-
         await browser.close()
-    return out
+    return events
