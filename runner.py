@@ -10,6 +10,12 @@ from scrapers.bet365 import fetch_events as fetch_bet365
 TELEGRAM_BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 CHAT_ID = os.environ["CHAT_ID"]
 TOTAL_STAKE = float(os.environ.get("TOTAL_STAKE", "10000"))
+SPORTS = [s.strip().lower() for s in os.environ.get("SPORTS", "tenisz,labdarúgás").split(",")]
+
+def send_telegram(text: str):
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    data = {"chat_id": CHAT_ID, "text": text}
+    requests.post(url, data=data, timeout=30).raise_for_status()
 
 def format_alert(arb, total_stake: float) -> str:
     lines = []
@@ -28,21 +34,29 @@ def format_alert(arb, total_stake: float) -> str:
             lines.append(f"• {a['outcome']}: {a['stake']} → kifizetés {a['expected_payout']} (profit {a['expected_profit']})")
     return "\n".join(lines)
 
-def send_telegram(text: str):
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    data = {"chat_id": CHAT_ID, "text": text}
-    requests.post(url, data=data, timeout=30).raise_for_status()
-
 async def main():
     events = []
-    for fetch in (fetch_tippmixpro, fetch_vegas, fetch_bet365):
-        try:
-            events.extend(await fetch())
-        except Exception as e:
-            send_telegram(f"ℹ️ Scraper hiba: {fetch.__module__}: {e}")
+
+    # Tippmixpro
+    try:
+        events.extend(await fetch_tippmixpro(SPORTS))
+    except Exception as e:
+        send_telegram(f"⚠️ Scraper hiba (Tippmixpro): {e}")
+
+    # Vegas.hu
+    try:
+        events.extend(await fetch_vegas(SPORTS))
+    except Exception as e:
+        send_telegram(f"⚠️ Scraper hiba (Vegas.hu): {e}")
+
+    # Bet365
+    try:
+        events.extend(await fetch_bet365(SPORTS))
+    except Exception as e:
+        send_telegram(f"⚠️ Scraper hiba (Bet365): {e}")
 
     if not events:
-        send_telegram("ℹ️ Nincs elérhető odds (scraper üres).")
+        send_telegram("ℹ️ Nincs elérhető odds (scraperek üresek).")
         return
 
     arbs = find_surebets(events, stake=TOTAL_STAKE)
