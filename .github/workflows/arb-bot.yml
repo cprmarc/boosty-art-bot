@@ -1,9 +1,9 @@
 name: Arbitrage Bot (scheduled)
 
 on:
-  workflow_dispatch:            # kézzel is indítható az Actions fülön
+  workflow_dispatch:
   schedule:
-    - cron: "*/3 * * * *"       # 3 percenként fut
+    - cron: "*/3 * * * *"   # 3 percenként fut
 
 jobs:
   run:
@@ -31,12 +31,12 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
           TOTAL_STAKE: ${{ secrets.TOTAL_STAKE }}
-          SPORTS: ${{ secrets.SPORTS }}                 # pl.: "tenisz,labdarúgás"
-          ONLY_NOTIFY_ON_SUREBETS: ${{ secrets.ONLY_NOTIFY_ON_SUREBETS }}  # "1" vagy "0"
-          VERBOSE: ${{ secrets.VERBOSE }}               # "1" = diagnosztika, ha nincs találat
-          # Aggregátor:
-          AGG_ENABLED: ${{ secrets.AGG_ENABLED }}       # "1"=bekapcsolva
-          AGG_URL: ${{ secrets.AGG_URL }}               # pl.: https://odds.am/en/tennis
+          ONLY_NOTIFY_ON_SUREBETS: ${{ secrets.ONLY_NOTIFY_ON_SUREBETS }}  # "1" (alap) vagy "0"
+          VERBOSE: ${{ secrets.VERBOSE }}                                   # "1" = diagnosztika
+          # Opcionális URL-listák (vesszővel elválasztva)
+          TIPPMIX_URLS: ${{ secrets.TIPPMIX_URLS }}
+          VEGAS_URLS: ${{ secrets.VEGAS_URLS }}
+          BET365_URLS: ${{ secrets.BET365_URLS }}
         run: |
           . .venv/bin/activate
           python runner.py
